@@ -1,7 +1,15 @@
-#include "Peripheral_Setup.h"
+#include "Perifericos_Setup.h"
 
-//DECLARAÇÃO DAS VARIÁVEIS AUXILIARES
+uint32_t count = 0, index = 0;
+uint16_t sinetable[400];
 
+uint16_t adc1 = 0;
+uint16_t adc2 = 0;
+
+uint16_t plot[400];
+uint16_t *adc = &adc1;
+
+_interrupt isr_adc(void);
 
 int main(void){
 
@@ -15,48 +23,39 @@ int main(void){
     IFR = 0x0000; //RESETA O FLAG DAS INTERRUPÇÕES
     InitPieVectTable(); //PREENCHE OS REGISTRADORES DE INTERRUPÇÃO COM O ENDEREÇO DAS FUNÇÕES DOS PERIFÉRICOS
 
-    //CONFIGURA ENTRADAS E SAÍDAS
-    Setup_GPIO();
-    //CONFIGURA PWM
-    Setup_ePWM();
-    
+    Setup_GPIO();//CONFIGURA ENTRADAS E SAÍDAS
+    Setup_ePWM();//CONFIGURA PWM
 
     EALLOW;
-    
-       CpuSysRegs.PCLKCR13.bit.ADC_A = 1;
-       AdcaRegs.ADCCTL2.bit.PRESCALE = 6;          // set ADCCLK divider to /4
-       AdcSetMode(ADC_ADCA, ADC_RESOLUTION_12BIT, ADC_SIGNALMODE_SINGLE);
-       AdcaRegs.ADCCTL1.bit.INTPULSEPOS = 1;       // Set pulse um ciclo antes do resultado
-       AdcaRegs.ADCCTL1.bit.ADCPWDNZ = 1;          // power up the ADC
-       DELAY_US(1000);                             // delay for 1ms to allow ADC time to power up
-
-       AdcaRegs.ADCSOC0CTL.bit.CHSEL = 3;
-       AdcaRegs.ADCSOC0CTL.bit.ACQPS = acqps;          //sample window is 15 SYSCLK cycles
-       AdcaRegs.ADCSOC0CTL.bit.TRIGSEL = 0x05; //trigger on ePWM2 SOCA
-
-       AdcaRegs.ADCSOC1CTL.bit.CHSEL = 4;
-       AdcaRegs.ADCSOC1CTL.bit.ACQPS = acqps;
-       AdcaRegs.ADCSOC1CTL.bit.TRIGSEL = 0x05;
-
-       AdcaRegs.ADCINTSEL1N2.bit.INT1SEL = 0x01;       // end of SOC1 will set INT1 flag
-       AdcaRegs.ADCINTSEL1N2.bit.INT1E = 1;            // enable INT1 flag
-       AdcaRegs.ADCINTFLGCLR.bit.ADCINT1 = 1;          // make sure INT1 flag is cleared
-
-       EDIS;
-    
+    PieVectTable.TIMER0_INT = &isr_adc;
+    PieCtrlRegs.PIEIER1.bit.INTx1 = 1;  //ADC está na coluna 1, linha 1 da tabela de interrpções
+    EDIS;
+    IER |= M_INT1; //Habilita interrupção da linha 1
 
 
-
+    //HABILITA NOVAMENTE AS INTERRUPÇÕES
     EINT; //INTERRUPÇÃO GLOBAL
     ERTM; //INTERRUPÇÃO EM TEMPO REAL
 
-    //DESLIGA OS DOIS LED'S
-
-
     while(1){//LOOP INFINITO
-
     }
     return 0;
 }
 
+_interrupt void isr_adc(void){
+    GpioDataRegs.GPADAT.bit.GPIO14 = 1; //Pino de verificação de entrada da função
 
+    adc1 = AdcaResultRegs.ADCRESULT0; //Valor amostrado é alocado nas variáveis
+    adc2 = AdcaResultRegs.ADCRESULT1;
+
+    index = (index == 400) ? 0 : (index + 1);
+
+    EPwm7Regs.CMPA.bit.CMPA = sinetable[index];
+    EPwm8Regs.CMPA.bit.CMPA = sinetable[index];
+
+    plot[index] = *adc; //Plota o gráfico para mostrar a forma de onda que está sendo amostrada
+
+    AdcaRegs.ADCINTFLGCLR.bit.ADCINT1 = 1; //Limpa o flag da interrupção
+    PieCtrlRegs.PIEACK.all = PIEACK_GROUP1; //Limpa o flag para todas interrupções
+    GpioDataRegs.GPADAT.bit.GPIO14 = 0;
+}
